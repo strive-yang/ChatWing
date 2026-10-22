@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="utf-8">
+  <title>Current ChatGPT renderer — structural regression fixture</title>
+  <style>
+    body { margin: 0; font: 16px/1.8 sans-serif; }
+    main { height: 900px; overflow-y: auto; }
+    [data-turn-key] { padding: 30px 120px; min-height: 580px; }
+    [data-user-message-bubble] { margin: 0 0 60px auto; width: fit-content; padding: 16px; background: #eaf3ff; border-radius: 24px; }
+  </style>
+</head>
+<body>
+  <!-- Recreated from public renderer markers, not a capture of any private chat.
+       https://github.com/steipete/oracle/issues/517
+       A turn key identifies a group containing BOTH the prompt and the response. -->
+  <main><div id="thread">
+    <div data-turn-key="f17c0cc0-prompt">
+      <div data-content-search-unit-key="f17c0cc0:0:user"><div data-user-message-bubble="true">test</div></div>
+      <div data-content-search-unit-key="f17c0cc0:1:assistant"><div data-conversation-role="assistant"><div class="markdown"><p>测试成功！✅</p><p>我已正常收到你的消息，可以继续交流。</p></div></div></div>
+    </div>
+    <div data-turn-key="b809bd10-prompt">
+      <div data-content-search-unit-key="b809bd10:0:user"><div data-user-message-bubble="true">接着测试第二轮</div></div>
+      <div data-content-search-unit-key="b809bd10:1:assistant"><div data-conversation-role="assistant"><div class="markdown"><p>这是第二轮回答。</p></div></div></div>
+    </div>
+  </div></main>
+</body>
+</html>

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check, test and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install development dependencies
+        run: npm ci --ignore-scripts
+      - name: Check JavaScript syntax
+        run: npm run check
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser tests
+        run: npm test
+      - name: Package extension
+        run: python tools/package.py
+      - name: Upload extension package
+        uses: actions/upload-artifact@v7
+        with:
+          name: chatwing-extension
+          path: dist/ChatWing-*.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload test screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-screenshots
+          path: artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 7

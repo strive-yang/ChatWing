@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "ChatWing · ChatGPT 对话目录",
+  "version": "0.1.2",
+  "description": "悬停展开当前 ChatGPT 对话的提问目录，预览上下文，一键回到任意一轮。所有内容只在当前页面处理。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["content/styles.js", "content/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

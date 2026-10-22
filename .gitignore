@@ -1,0 +1,25 @@
+# Dependencies and local caches
+node_modules/
+.cache/
+__pycache__/
+*.py[cod]
+
+# Generated packages and browser test output
+/dist/
+/ChatWing-*.zip
+/artifacts/
+/test-results/
+/playwright-report/
+*.log
+
+# Local environment and editor/OS files
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~

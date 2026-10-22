@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatWing — 本地交互测试</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: #282b28; font: 15px/1.9 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    button, textarea { font: inherit; }
+    .sidebar { position: fixed; inset: 0 auto 0 0; width: 242px; padding: 25px 18px; background: #f8f9f7; border-right: 1px solid #f0f1ef; }
+    .logo { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 650; padding: 0 9px 26px; }
+    .logo span { font-size: 24px; }
+    .nav { padding: 8px 12px; font-size: 13px; margin-bottom: 4px; }
+    .nav.muted { color: #969c94; font-size: 11px; margin-top: 24px; }
+    .nav.selected { background: #e9ede7; border-radius: 9px; }
+    .profile { position: absolute; bottom: 22px; left: 28px; font-size: 12px; }
+    .avatar { display: inline-grid; place-items: center; width: 29px; height: 29px; margin-right: 9px; border-radius: 50%; background: #e5ebe0; color: #5b6c50; font-size: 11px; }
+    .topbar { position: fixed; top: 0; right: 0; left: 242px; height: 64px; padding: 15px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f7f8f6; background: #fff; z-index: 2; }
+    .topbar .title { font-size: 18px; font-weight: 550; }
+    .topbar .title span { color: #858b82; font-size: 12px; padding-left: 5px; }
+    .share { font-size: 12px; padding: 4px 14px; border: 1px solid #e5e8e2; border-radius: 20px; }
+    main { position: fixed; top: 64px; left: 242px; right: 0; bottom: 138px; overflow-y: auto; scroll-behavior: auto; scrollbar-width: thin; scrollbar-color: #e3e6e0 transparent; }
+    #conversation { max-width: 758px; margin: auto; padding: 36px 36px 90px; }
+    article { margin: 0 0 30px; }
+    article[data-turn="user"] { display: flex; justify-content: flex-end; padding-top: 25px; }
+    [data-user-message-bubble] { border-radius: 22px; background: #f2f3f0; padding: 13px 21px; max-width: 87%; font-size: 14px; }
+    .assistant-content { padding: 6px 4px; }
+    .assistant-content p { margin: 10px 0 20px; }
+    .assistant-content h3 { font-size: 19px; margin: 20px 0 10px; }
+    .assistant-content ul { margin-top: 6px; padding-left: 22px; }
+    .assistant-content li { padding: 4px 0; }
+    .answer-actions { color: #a0a69c; font-size: 12px; letter-spacing: 8px; margin-top: 22px; }
+    .composer { position: fixed; left: 242px; bottom: 0; right: 0; height: 138px; background: #fff; padding: 10px 48px 0; }
+    .input { display: flex; align-items: center; justify-content: space-between; max-width: 704px; margin: auto; border: 1px solid #e3e7df; background: #fafbf8; border-radius: 25px; padding: 18px 22px; color: #949b8d; font-size: 14px; }
+    .send { width: 30px; height: 30px; border-radius: 50%; background: #30362c; color: #fff; text-align: center; }
+    .disclaimer { text-align: center; margin: 12px 0; color: #a4aa9e; font-size: 10px; }
+    .dark body, .dark .topbar, .dark .composer { background: #212321; color: #e6eae4; }
+    .dark .sidebar { background: #191c19; border-color: #2b302a; }
+    .dark .nav.selected, .dark [data-user-message-bubble], .dark .input { background: #2e332d; }
+    .dark .topbar, .dark .share, .dark .input { border-color: #3a4037; }
+    @media (max-width: 800px) { .sidebar { display: none; } main, .topbar, .composer { left: 0; } #conversation { padding-left: 24px; padding-right: 48px; } .composer { padding: 10px 24px 0; } }
+  </style>
+</head>
+<body>
+  <aside class="sidebar"><div class="logo"><span>◉</span> ChatGPT</div><div class="nav">＋　新聊天</div><div class="nav">⌕　搜索聊天</div><div class="nav">▧　我的项目</div><div class="nav muted">今天</div><div class="nav selected">Chrome 插件设计</div><div class="nav">整理阅读笔记</div><div class="nav">周末的徒步计划</div><div class="nav muted">昨天</div><div class="nav">从零开始学习 TypeScript</div><div class="nav">一些关于设计的想法</div><div class="profile"><span class="avatar">Y</span> 我的空间</div></aside>
+  <header class="topbar"><div class="title">ChatGPT <span>⌄</span></div><div class="share">↥　分享</div></header>
+  <main id="conversation-scroll"><div id="conversation"></div></main>
+  <footer class="composer"><div class="input">继续这段对话…<span class="send">↑</span></div><p class="disclaimer">ChatGPT 也可能会犯错。请核查重要信息。 · 此页面仅用于插件本地测试</p></footer>
+  <script>
+    window.samples = [
+      ["我想做一个 ChatGPT 浏览器插件，让长对话更容易回看。", "可以先把它收敛成一个很小的工具：将你的每次提问整理成目录，在对话页面的右侧展示。这样无论聊了多久，都能快速找到之前的上下文。"],
+      ["只处理当前这条聊天就好，不需要账号里的其他聊天。", "范围确定了：只读取当前聊天页面的消息。插件不需要访问其他会话，也不需要服务器或 API Key。"],
+      ["目录的每一项应该显示什么？", "建议每次提问对应一个目录项，显示序号和提问的开头。长提问最多显示两行，保留足够的信息帮助你判断内容。"],
+      ["鼠标放上去的时候，我想看到完整的提问和回答开头。", "可以使用一个轻量的预览面板。<h3>让上下文触手可及</h3><p>悬停目录项时，面板显示完整提问，以及 ChatGPT 回答的前几段。长提问可以独立滚动，不会打断你当前的阅读位置。</p><ul><li>提问按原文呈现，保留段落。</li><li>回答只显示开头，便于快速回忆。</li><li>鼠标可以移入预览，慢慢阅读。</li></ul>"],
+      ["点击以后跳转到那条消息，能不能顺便高亮一下？", "点击目录项后，页面会平滑滚动到对应提问，并给提问加上一个短暂的柔和描边。系统开启减少动态效果时，会直接定位。"],
+      ["平时希望它尽量安静，不要占用正文的空间。", "平时仅保留右侧的一条细窄目录栏，用刻度暗示对话的位置。鼠标移入时再展开完整目录，移开后收起。"],
+      ["聊得很长以后，目录还会实时更新吗？", "会。新提问自动进入目录，回答生成时预览同步更新。在 ChatGPT 内切换聊天后，也会重新识别当前聊天的内容。"],
+      ["暗色模式和比较窄的窗口也要支持。", "目录的颜色会跟随网页的明暗主题。窗口较窄时，预览放进目录面板下方，避免超出屏幕。"],
+      ["很好，就叫它 ChatWing 吧。请做一个可以直接加载的版本。", "ChatWing 会采用 Chrome Manifest V3，无需构建工具。打开扩展程序管理页面、启用开发者模式，加载插件文件夹后就能使用。"]
+    ];
+    window.addTurn = (question, answer, options = {}) => {
+      const root = document.getElementById('conversation');
+      const start = root.children.length;
+      for (const [offset, role, text] of [[0, 'user', question], [1, 'assistant', answer]]) {
+        const article = document.createElement(options.tag || 'article');
+        article.dataset.testid = `conversation-turn-${start + offset}`;
+        article.dataset.turn = role;
+        article.dataset.turnKey = `${start + offset}:${role}`;
+        const message = document.createElement('div');
+        message.dataset.messageAuthorRole = role;
+        message.dataset.messageId = `message-${start + offset}`;
+        const body = document.createElement('div');
+        if (role === 'user') { body.dataset.userMessageBubble = 'true'; body.className = 'whitespace-pre-wrap'; body.textContent = text; }
+        else { body.className = 'markdown assistant-content'; body.innerHTML = `<p>${text}</p><div class="answer-actions" aria-hidden="true">◧ ♧ ♡ ↻</div>`; }
+        message.append(body); article.append(message); root.append(article);
+      }
+    };
+    samples.forEach(pair => addTurn(...pair));
+  </script>
+</body>
+</html>

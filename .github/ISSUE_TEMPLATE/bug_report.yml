@@ -1,0 +1,39 @@
+name: 问题反馈
+description: 报告安装、目录识别或交互问题
+body:
+  - type: markdown
+    attributes:
+      value: 请先查看 README 和使用指南。请勿提交真实对话、会话链接、令牌或含账号信息的截图。
+  - type: input
+    id: version
+    attributes:
+      label: ChatWing 版本
+      placeholder: 例如 0.1.2，可在 chrome://extensions 查看
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 浏览器版本和操作系统
+      placeholder: 例如 Chrome 版本号 / Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 使用不含私人信息的示例描述操作步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 预期行为和实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 识别统计（可选）
+      description: 目录为空时可展开「查看识别状态」，复制其中的统计。粘贴前请确认不含私人信息。
+      render: json
