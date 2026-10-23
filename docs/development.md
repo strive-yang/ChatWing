@@ -37,7 +37,11 @@ Linux 首次安装浏览器时可用 `npx playwright install --with-deps chromiu
 
 `npm run check` 检查两个内容脚本的语法；`npm test` 使用 Node.js 测试运行器，串行执行浏览器测试，输出截图到 `artifacts/`。浏览器使用 Playwright 安装的 Chromium；如需指定兼容的 Chromium / Chrome for Testing，可设置 `CHATWING_BROWSER_PATH` 为可执行文件的绝对路径。不要指向个人浏览器的用户数据目录。
 
-测试创建独立临时浏览器配置，通过路由拦截在匹配的 ChatGPT 域名下提供本地 HTML，让浏览器实际注入扩展；无需登录，不读取真实聊天。覆盖消息识别、动态回答、分支编辑、页面内导航、长对话补全、键盘交互、主题及窄窗口。模拟页面通过不代表所有线上页面结构都兼容。
+测试创建独立临时浏览器配置，通过路由拦截在匹配的 ChatGPT 域名下提供本地 HTML，让浏览器实际注入扩展；无需登录，不读取真实聊天。覆盖消息识别、动态回答、分支编辑、页面内导航、长对话补全、键盘交互、主题及窄窗口。新增回归还覆盖长目录滚轮首尾可达、宿主滚轮拦截、对话计数、延迟渲染后的跳转校准，以及部分卸载时的消息配对。扫描过滤测试在浏览器内加载相同源码并插入计数探针，验证无关更新不会触发全量扫描。模拟页面通过不代表所有线上页面结构都兼容。
+
+`windowed-layout.html` 另模拟十五轮中每次仅保留五个完整轮次节点，覆盖补全恢复原位后目录不退回五条、旧条目重新挂载，以及编辑和聊天切换时清理缓存。`completion.test.cjs` 覆盖历史分页慢于固定等待时长、反向容器负滚动位置与跳转。调查依据及方案取舍见[长对话虚拟化调查](research/conversation-virtualization.md)。
+
+`completion-cover.test.cjs` 验证阅读保护层确实覆盖正文、其下仍可读取历史、进度使用已读数量，以及停止、成功完成和切换聊天后移除保护层。状态提示不主动抢占焦点，采用 [W3C 状态消息建议](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html) 的 `role="status"`；保护层仍基于 DOM 滚动补全，不宣称免滚动取得完整会话。
 
 ## 本地调试
 

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN" class="light">
+<head>
+  <meta charset="utf-8">
+  <title>Windowed conversation regression fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.8 sans-serif; }
+    main { position: fixed; inset: 64px 0 136px; overflow-y: auto; overflow-anchor: none; }
+    [data-turn-key] { height: 500px; padding: 30px 120px; }
+    [data-user-message-bubble] { margin: 0 0 60px auto; width: fit-content; padding: 16px; background: #eaf3ff; border-radius: 24px; }
+  </style>
+</head>
+<body>
+  <!-- Synthetic thread: old groups leave the DOM completely, while anonymous
+       spacers preserve scroll geometry. Never more than five groups are mounted. -->
+  <main><div id="thread"></div></main>
+  <script>
+    (() => {
+      let total = 15;
+      const edits = new Map();
+      const windowSize = 5;
+      const turnHeight = 500;
+      const scroller = document.querySelector("main");
+      const thread = document.querySelector("#thread");
+      let mountedStart = -1;
+      function renderWindow(start) {
+        if (start === mountedStart) return;
+        mountedStart = start;
+        const top = document.createElement("div");
+        top.style.height = `${start * turnHeight}px`;
+        const bottom = document.createElement("div");
+        bottom.style.height = `${(total - start - windowSize) * turnHeight}px`;
+        const groups = [];
+        for (let index = start; index < start + windowSize; index++) {
+          const group = document.createElement("div");
+          group.dataset.turnKey = `window-${index}-prompt`;
+          group.innerHTML = `<div data-content-search-unit-key="window-${index}:0:user"><div data-user-message-bubble="true"></div></div>`;
+          group.firstElementChild.firstElementChild.textContent = edits.get(index) || `第 ${index + 1} 轮的知识点提问`;
+          if (!edits.has(index)) group.insertAdjacentHTML("beforeend", `<div data-content-search-unit-key="window-${index}:1:assistant"><div class="markdown">第 ${index + 1} 轮的对应回答</div></div>`);
+          groups.push(group);
+        }
+        thread.replaceChildren(top, ...groups, bottom);
+      }
+      renderWindow(total - windowSize);
+      scroller.scrollTop = scroller.scrollHeight;
+      scroller.addEventListener("scroll", () => {
+        const start = Math.max(0, Math.min(total - windowSize, Math.floor(scroller.scrollTop / turnHeight) - 1));
+        renderWindow(start);
+      }, { passive: true });
+      window.editRound = (index, question) => {
+        total = index + 1;
+        edits.set(index, question);
+        mountedStart = -1;
+        renderWindow(Math.max(0, total - windowSize));
+      };
+      window.truncateRounds = count => {
+        total = count;
+        mountedStart = -1;
+        renderWindow(Math.max(0, total - windowSize));
+      };
+    })();
+  </script>
+</body>
+</html>

@@ -1,11 +1,11 @@
 {
   "name": "chatwing",
-  "version": "0.1.2",
+  "version": "0.1.7",
   "private": true,
   "description": "A local, dependency-free Chrome extension for navigating the current ChatGPT conversation.",
   "scripts": {
     "check": "node --check content/styles.js && node --check content/content.js",
-    "test": "node --test --test-concurrency=1 tests/browser.test.cjs",
+    "test": "node --test --test-concurrency=1",
     "package": "python tools/package.py"
   },
   "devDependencies": {

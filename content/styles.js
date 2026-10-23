@@ -65,7 +65,7 @@ var CHATWING_CSS = String.raw`
     right: 36px;
     top: 50%;
     width: 224px;
-    max-height: min(520px, calc(100dvh - 32px));
+    max-height: min(260px, calc(100dvh - 32px));
     display: flex;
     flex-direction: column;
     border: 1px solid var(--cw-line);
@@ -79,13 +79,14 @@ var CHATWING_CSS = String.raw`
   }
   .wing.is-open .panel { opacity: 1; visibility: visible; transform: translate(0, -50%); }
   .panel::after { content: ""; position: absolute; top: 0; bottom: 0; right: -16px; width: 16px; }
-  .tools { display: flex; justify-content: flex-end; gap: 2px; padding: 5px 6px 0; flex: none; }
+  .tools { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 5px 6px 0; flex: none; }
+  .conversation-count { margin-right: auto; padding-left: 5px; color: var(--cw-muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .icon-button { display: grid; place-items: center; width: 22px; height: 22px; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: var(--cw-muted); }
   .icon-button:hover { background: var(--cw-raised); color: var(--cw-text); }
   .icon-button[aria-pressed="true"] { background: var(--cw-soft); color: var(--cw-accent); }
   .icon-button svg { width: 13px; height: 13px; }
   .load-button[aria-busy="true"] { color: var(--cw-accent); }
-  .list { min-height: 48px; overflow: auto; overscroll-behavior: contain; padding: 6px; scrollbar-width: thin; scrollbar-color: var(--cw-line) transparent; }
+  .list { min-height: 68px; max-height: 230px; overflow: auto; overscroll-behavior: contain; padding: 6px; scrollbar-width: thin; scrollbar-color: var(--cw-line) transparent; }
   ol { margin: 0; padding: 0; list-style: none; }
   li + li { margin-top: 2px; }
   .entry {
@@ -108,7 +109,13 @@ var CHATWING_CSS = String.raw`
   .diagnostics { margin-top: 16px; text-align: left; font-size: 10px; }
   .diagnostics summary { cursor: pointer; color: var(--cw-accent); }
   .diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: 8px; background: var(--cw-raised); font: 10px/1.8 ui-monospace, monospace; user-select: text; }
-  .notice { padding: 8px 12px; border-top: 1px solid var(--cw-line); color: var(--cw-muted); font-size: 11px; }
+  .notice { flex: none; max-height: 32px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 6px 12px; border-top: 1px solid var(--cw-line); color: var(--cw-muted); font-size: 11px; }
+  .completion-cover { position: absolute; z-index: -1; display: grid; place-items: center; background: var(--cw-bg); color: var(--cw-text); }
+  .completion-status { max-width: min(320px, calc(100vw - 48px)); padding: 20px; text-align: center; }
+  .completion-title { margin: 0; font-size: 14px; font-weight: 500; }
+  .completion-progress { margin: 8px 0 16px; color: var(--cw-muted); font-size: 12px; }
+  .completion-stop { padding: 6px 12px; border: 1px solid var(--cw-line); border-radius: 7px; background: var(--cw-raised); font-size: 12px; }
+  .completion-stop:hover { background: var(--cw-soft); color: var(--cw-accent); }
   .preview {
     position: absolute;
     right: calc(100% + 12px);
@@ -130,8 +137,8 @@ var CHATWING_CSS = String.raw`
   .answer-section { margin-top: 12px; border-top: 1px solid var(--cw-line); padding-top: 12px; }
   .answer { margin: 0; color: var(--cw-muted); font-size: 12px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
   @media (max-width: 640px) {
-    .preview { position: static; width: auto; max-height: min(220px, calc(100dvh - 150px)); flex-shrink: 0; margin: 0 6px 6px; box-shadow: none; border-radius: 8px; padding: 12px; }
-    .question { max-height: 100px; }
+    .preview { position: static; width: auto; min-height: 0; max-height: min(100px, calc(100dvh - 120px)); flex-shrink: 1; margin: 0 6px 6px; box-shadow: none; border-radius: 8px; padding: 8px; }
+    .question { max-height: 60px; }
     .answer { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   }
   @media (max-width: 430px) {

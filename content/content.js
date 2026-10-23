@@ -28,6 +28,7 @@
       </button>
       <section id="cw-panel" class="panel" aria-label="ChatWing 对话目录" inert>
           <div class="tools">
+            <span class="conversation-count" title="当前分支已读取的提问轮数；点击圆形箭头补全历史" aria-live="polite" aria-atomic="true">已读 0 轮</span>
             <button class="icon-button load-button" aria-label="补全目录" title="补全未加载的消息">
               <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M15.5 7a6 6 0 1 0 .4 5M15.5 3.5V7H12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
@@ -45,12 +46,19 @@
           <div class="answer-section"><p class="answer"></p></div>
         </aside>
       </section>
+    </div>
+    <div class="completion-cover" role="region" aria-label="目录补全进度" hidden>
+      <div class="completion-status">
+        <p class="completion-title">正在整理历史目录</p>
+        <p class="completion-progress" role="status" aria-live="polite" aria-atomic="true"></p>
+        <button class="completion-stop">停止并回到原位</button>
+      </div>
     </div>`;
   shadow.append(template.content.cloneNode(true));
   document.body.append(host);
 
   const ui = {};
-  for (const name of ["wing", "rail", "ticks", "panel", "pin", "close", "list", "empty", "load-button", "notice", "preview", "question", "answer"]) {
+  for (const name of ["wing", "rail", "ticks", "panel", "pin", "close", "list", "empty", "load-button", "notice", "preview", "question", "answer", "conversation-count", "completion-cover", "completion-progress", "completion-stop"]) {
     ui[name] = shadow.querySelector(`.${name}`);
   }
   ui.ol = shadow.querySelector("ol");
@@ -60,8 +68,14 @@
   let scrollFrame = 0;
   let renderSignature = "";
   let loadController = null;
+  let jumpController = null;
   let restoreAfterLoad = true;
   let noticeTimer = 0;
+  let lastScanScroller = null;
+  let lastScanTop = 0;
+  let windowed = false;
+  let loadSeen = null;
+  let loadViewport = null;
   const systemTheme = matchMedia("(prefers-color-scheme: dark)");
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -175,17 +189,35 @@
     const seenGroups = new Set();
     for (const group of groups) {
       const groupKey = group.getAttribute("data-turn-key");
-      if (groupKey) seenGroups.add(groupKey);
       const units = outermost([...group.querySelectorAll(MESSAGE_SELECTOR)].filter(isActive), group);
       const roles = new Set(units.map(roleOf).filter(Boolean));
-      if (roles.size > 1 || (groupKey && !roleOf(group) && units.length)) {
+      const groupRole = roleOf(group) || groupKey?.match(/:(user|assistant)$/)?.[1];
+      if (roles.size > 1 || (groupKey && !groupRole)) {
         // Current ChatGPT groups the user prompt AND the response under one key.
+        const boundaryKey = groupKey || describeMessage(group, messages.length).key;
+        seenGroups.add(boundaryKey);
         const parts = units.map((unit, index) => describeMessage(unit, messages.length + index));
-        messages.push(...parts);
-        if (groupKey) groupSnapshots.set(groupKey, parts.map(({ key, role }) => ({ key, role })));
-      } else if (!units.length && groupKey && groupSnapshots.has(groupKey) && !roleOf(group)) {
-        // Retain previously read text when a whole grouped turn is virtualized.
-        messages.push(...groupSnapshots.get(groupKey).map(part => ({ ...part, anchor: group, source: null })));
+        let previous = groupSnapshots.get(boundaryKey) || [];
+        const question = parts.find(part => part.role === "user");
+        const oldQuestion = previous.find(part => part.role === "user");
+        if (question && oldQuestion) {
+          const saved = cache.get(oldQuestion.key);
+          const changedText = saved?.text && question.source.textContent.trim() && question.source.textContent !== saved.raw && messageText(question.source, "user") !== saved.text;
+          // An edited branch must not inherit the old answer while it generates.
+          if (question.key !== oldQuestion.key || changedText) {
+            for (const part of previous) if (part.role === "assistant") cache.delete(part.key);
+            previous = [];
+          }
+        }
+        const merged = ["user", "assistant"].flatMap(role => {
+          const live = parts.filter(part => part.role === role);
+          return live.length ? live : previous.filter(part => part.role === role).map(part => ({ ...part, anchor: group, source: null }));
+        });
+        // A stable turn shell still identifies a navigable round before ChatGPT
+        // mounts its messages. Do not reduce a long thread to its visible turns.
+        if (!merged.length && !units.length) merged.push({ key: `${boundaryKey}:user`, role: "user", anchor: group, source: null });
+        messages.push(...merged.map(part => ({ ...part, groupKey: boundaryKey, orderAnchor: group })));
+        groupSnapshots.set(boundaryKey, merged.map(({ key, role }) => ({ key, role })));
       } else messages.push(describeMessage(group, messages.length));
     }
     const loose = [...main.querySelectorAll(MESSAGE_SELECTOR)].filter(node => {
@@ -195,7 +227,11 @@
     });
     messages.push(...outermost(loose, main).map((node, index) => describeMessage(node, messages.length + index)));
     for (const key of groupSnapshots.keys()) if (!seenGroups.has(key)) groupSnapshots.delete(key);
-    return messages.sort((a, b) => a.anchor === b.anchor ? 0 : a.anchor.compareDocumentPosition(b.anchor) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    return messages.sort((a, b) => {
+      const left = a.orderAnchor || a.anchor;
+      const right = b.orderAnchor || b.anchor;
+      return left === right ? 0 : left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
   }
 
   function collectEntries() {
@@ -203,7 +239,7 @@
     const entries = [];
     let current = null;
 
-    for (const { anchor, source, key, role } of collectMessages()) {
+    for (const { anchor, source, key, role, groupKey } of collectMessages()) {
       const previous = cache.get(key);
       if (role !== "user" && role !== "assistant") continue;
       const raw = source?.textContent || "";
@@ -217,14 +253,14 @@
       if (role === "user") {
         const attachment = anchor.querySelector("img[alt]")?.getAttribute("alt");
         current = {
-          key, anchor,
+          key, anchor, groupKey,
           question: record.text,
           label: record.text.replace(/\s+/g, " ").slice(0, 100) || (attachment ? `图片：${attachment}` : "提问内容待加载"),
           answer: "",
           pending: !record.text,
         };
         entries.push(current);
-      } else if (current && record.text) {
+      } else if (current && current.groupKey === groupKey && record.text) {
         current.answer = `${current.answer}${current.answer ? "\n\n" : ""}${record.text}`.slice(0, 600);
       }
     }
@@ -233,12 +269,57 @@
     return entries;
   }
 
+  function reconcileEntries(mounted) {
+    if (!mounted.length) {
+      windowed = false;
+      lastScanScroller = null;
+      return [];
+    }
+    const container = scrollContainer(mounted[0].anchor);
+    const top = container.scrollTop;
+    const identity = entry => entry.groupKey || entry.key;
+    const previous = new Map(state.entries.map(entry => [identity(entry), entry]));
+    const liveKeys = new Set(mounted.map(identity));
+    const missing = state.entries.some(entry => !liveKeys.has(identity(entry)));
+    const arriving = mounted.some(entry => !previous.has(identity(entry)));
+    const scrolled = container === lastScanScroller && Math.abs(top - lastScanTop) > 2;
+    if (container !== lastScanScroller) windowed = false;
+    // A scrolling window can remove the entire turn, not just its contents.
+    // Only retain missing turns after observing that window move; ordinary
+    // branch deletions in a fully mounted thread still remove their entries.
+    if (missing && arriving && (scrolled || state.loading)) windowed = true;
+    lastScanScroller = container;
+    lastScanTop = top;
+    const live = mounted.map(entry => ({ ...entry, container,
+      position: top + entry.anchor.getBoundingClientRect().top - viewportTop(container) }));
+    if (!windowed) return live;
+
+    const edited = live.find(entry => {
+      const old = previous.get(identity(entry));
+      return old?.question && entry.question && old.question !== entry.question;
+    });
+    const retained = state.entries.filter(entry => !edited || entry.position < previous.get(identity(edited)).position);
+    const merged = new Map(retained.map(entry => [identity(entry), {
+      ...entry, anchor: entry.anchor?.isConnected ? entry.anchor : null,
+    }]));
+    for (const entry of live) {
+      const old = merged.get(identity(entry));
+      merged.set(identity(entry), old && entry.pending ? {
+        ...entry, question: old.question, label: old.label, answer: old.answer, pending: old.pending,
+      } : entry);
+    }
+    return [...merged.values()].sort((a, b) => a.position - b.position);
+  }
+
   function scan() {
     clearTimeout(scanTimer);
     scanTimer = 0;
     checkRoute();
     const previousKey = state.entries[state.active]?.key;
-    state.entries = collectEntries();
+    const previousPreview = state.entries.find(item => item.key === state.previewKey);
+    const mounted = collectEntries();
+    if (loadSeen) for (const entry of mounted) loadSeen.add(entry.groupKey || entry.key);
+    state.entries = reconcileEntries(mounted);
     if (!state.entries.length) {
       // Counts only: do not include conversation IDs, prompts, answers or tokens.
       shadow.querySelector(".diagnostics-data").textContent = JSON.stringify({
@@ -258,11 +339,15 @@
       renderList();
     }
     if (state.previewKey) {
-      const entry = state.entries.find(item => item.key === state.previewKey);
-      if (entry) updatePreview(entry);
-      else hidePreview();
+      const entry = state.entries.find(item => item.key === state.previewKey) ||
+        (previousPreview?.groupKey && state.entries.find(item => item.groupKey === previousPreview.groupKey));
+      if (entry) {
+        state.previewKey = entry.key;
+        updatePreview(entry);
+      } else hidePreview();
     }
     updateActive();
+    updateCompletionCover();
   }
 
   function scheduleScan() {
@@ -271,6 +356,7 @@
   }
 
   function renderList() {
+    ui["conversation-count"].textContent = `已读 ${state.entries.length} 轮`;
     const fragment = document.createDocumentFragment();
     state.entries.forEach((entry, index) => {
       const li = document.createElement("li");
@@ -316,11 +402,39 @@
     ui["load-button"].setAttribute("aria-label", label);
     ui["load-button"].setAttribute("aria-busy", String(state.loading));
     ui["load-button"].title = label;
+    ui["conversation-count"].title = `ChatWing ${host.dataset.version} · 当前分支已读取的提问轮数；点击圆形箭头补全历史`;
+  }
+
+  function updateCompletionCover() {
+    if (!loadViewport || ui["completion-cover"].hidden) return;
+    const rect = loadViewport === document.scrollingElement
+      ? { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+      : loadViewport.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    Object.assign(ui["completion-cover"].style, {
+      left: `${left - hostRect.left}px`, top: `${top - hostRect.top}px`,
+      width: `${Math.max(0, Math.min(innerWidth, rect.right) - left)}px`,
+      height: `${Math.max(0, Math.min(innerHeight, rect.bottom) - top)}px`,
+    });
+    const progress = `已读 ${state.entries.length} 轮`;
+    if (ui["completion-progress"].textContent !== progress) ui["completion-progress"].textContent = progress;
+  }
+
+  function setCompletionCover(container) {
+    loadViewport = container;
+    if (!container && ui["completion-cover"].contains(shadow.activeElement)) {
+      (state.open ? ui["load-button"] : ui.rail).focus({ preventScroll: true });
+    }
+    ui["completion-cover"].hidden = !container;
+    updateCompletionCover();
   }
 
   function scrollContainer(element) {
     for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-      if (/(auto|scroll)/.test(getComputedStyle(parent).overflowY) && parent.scrollHeight > parent.clientHeight + 1) return parent;
+      const overflow = getComputedStyle(parent).overflowY;
+      if ((/(auto|scroll)/.test(overflow) || (overflow === "hidden" && parent.hasAttribute("data-scroll-root"))) && parent.scrollHeight > parent.clientHeight + 1) return parent;
     }
     return document.scrollingElement || document.documentElement;
   }
@@ -329,17 +443,31 @@
     return container === document.scrollingElement ? 0 : container.getBoundingClientRect().top;
   }
 
+  function scrollBounds(container) {
+    const extent = Math.max(0, container.scrollHeight - container.clientHeight);
+    const style = getComputedStyle(container);
+    const reverse = (style.display.includes("flex") && style.flexDirection === "column-reverse") || container.scrollTop < 0;
+    return reverse ? { min: -extent, max: 0 } : { min: 0, max: extent };
+  }
+
+  function clampScrollTop(container, top) {
+    const { min, max } = scrollBounds(container);
+    return Math.max(min, Math.min(max, top));
+  }
+
   function updateActive() {
     scrollFrame = 0;
     if (!state.entries.length) {
       state.active = -1;
       return;
     }
-    const container = scrollContainer(state.entries[0].anchor);
+    const firstMounted = state.entries.findIndex(entry => entry.anchor?.isConnected);
+    if (firstMounted < 0) return;
+    const container = scrollContainer(state.entries[firstMounted].anchor);
     const threshold = viewportTop(container) + Math.min(150, container.clientHeight * .23);
-    let active = 0;
+    let active = firstMounted;
     state.entries.forEach((entry, index) => {
-      if (entry.anchor.isConnected && entry.anchor.getBoundingClientRect().top <= threshold) active = index;
+      if (entry.anchor?.isConnected && entry.anchor.getBoundingClientRect().top <= threshold) active = index;
     });
     state.active = active;
     [...ui.ol.querySelectorAll(".entry")].forEach((button, index) => {
@@ -363,6 +491,7 @@
   }
 
   function showPreview(key) {
+    if (state.loading) return;
     const entry = state.entries.find(item => item.key === key);
     if (!entry) return;
     state.previewKey = key;
@@ -379,24 +508,41 @@
   function notify(message, persistent = false) {
     clearTimeout(noticeTimer);
     ui.notice.textContent = message;
+    ui.notice.title = message;
     ui.notice.hidden = !message;
     if (!persistent) noticeTimer = setTimeout(() => { ui.notice.hidden = true; }, 5000);
   }
 
-  function jumpTo(key) {
+  async function jumpTo(key) {
     restoreAfterLoad = false;
     loadController?.abort();
-    const entry = state.entries.find(item => item.key === key);
-    if (!entry?.anchor.isConnected) {
+    setCompletionCover(null);
+    jumpController?.abort();
+    const requested = state.entries.find(item => item.key === key);
+    const requestedRoute = route;
+    // Resolve against the current DOM, including a render that has not reached
+    // the debounced observer yet. A clicked key must never use an old anchor.
+    scan();
+    const entry = route === requestedRoute ? (state.entries.find(item => item.key === key) ||
+      (requested?.groupKey && state.entries.find(item => item.groupKey === requested.groupKey))) : null;
+    if (!entry) {
       scheduleScan();
       notify("消息已变化，目录正在更新。");
       return;
     }
-    const container = scrollContainer(entry.anchor);
-    const top = container.scrollTop + entry.anchor.getBoundingClientRect().top - viewportTop(container) - 86;
-    container.scrollTo({ top: Math.max(0, top), behavior: reducedMotion.matches ? "instant" : "smooth" });
-    const bubble = entry.anchor.querySelector('[data-user-message-bubble], [data-message-author-role="user"]') || entry.anchor;
-    if (!reducedMotion.matches) bubble.animate([
+    const container = entry.anchor?.isConnected ? scrollContainer(entry.anchor) : entry.container;
+    if (!container?.isConnected) return;
+    const controller = new AbortController();
+    jumpController = controller;
+    const { signal } = controller;
+    const stopScroll = () => container.scrollTo({ top: container.scrollTop, behavior: "instant" });
+    signal.addEventListener("abort", stopScroll, { once: true });
+    const savedRoute = route;
+    const targetTop = item => clampScrollTop(container,
+      item.anchor?.isConnected ? container.scrollTop + item.anchor.getBoundingClientRect().top - viewportTop(container) - 86 : item.position - 86);
+    container.scrollTo({ top: targetTop(entry), behavior: reducedMotion.matches ? "instant" : "smooth" });
+    const bubble = entry.anchor?.querySelector('[data-user-message-bubble], [data-message-author-role="user"]') || entry.anchor;
+    if (bubble && !reducedMotion.matches) bubble.animate([
       { outline: "2px solid transparent", outlineOffset: "6px" },
       { outline: "2px solid #6aa98b", outlineOffset: "6px", offset: .18 },
       { outline: "2px solid transparent", outlineOffset: "6px" },
@@ -405,7 +551,36 @@
       if (ui.panel.contains(shadow.activeElement)) ui.rail.focus({ preventScroll: true });
       setOpen(false);
     }
-    setTimeout(scheduleScan, 450);
+    const stopOnInput = event => {
+      if (event.composedPath().includes(host)) return;
+      if (event.type !== "keydown" || ["Escape", "ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)) controller.abort();
+    };
+    for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) document.addEventListener(type, stopOnInput, { capture: true, passive: true });
+    try {
+      // Let native smooth scrolling finish before correcting lazy-rendered
+      // layout shifts. Corrections are bounded and stop on any user scroll.
+      let previousTop = container.scrollTop;
+      let stable = 0;
+      for (let attempt = 0; attempt < 20 && stable < 2 && !signal.aborted; attempt++) {
+        await delay(60, signal);
+        const nextTop = container.scrollTop;
+        stable = Math.abs(nextTop - previousTop) < 1 ? stable + 1 : 0;
+        previousTop = nextTop;
+      }
+      for (let attempt = 0; attempt < 10 && !signal.aborted && routeKey() === savedRoute; attempt++) {
+        if (scanTimer) scan();
+        const current = state.entries.find(item => item.key === entry.key) ||
+          (entry.groupKey && state.entries.find(item => item.groupKey === entry.groupKey));
+        if (!current) break;
+        const top = targetTop(current);
+        if (Math.abs(container.scrollTop - top) > 2) container.scrollTo({ top, behavior: "instant" });
+        await delay(100, signal);
+      }
+    } finally {
+      signal.removeEventListener("abort", stopScroll);
+      for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) document.removeEventListener(type, stopOnInput, true);
+      if (jumpController === controller) jumpController = null;
+    }
   }
 
   function delay(ms, signal) {
@@ -417,13 +592,28 @@
     });
   }
 
+  function historyBusy(container) {
+    return container.getAttribute("aria-busy") === "true" ||
+      !!container.querySelector('#thread[aria-busy="true"], [data-conversation-transcript][aria-busy="true"], [data-scroll-root][aria-busy="true"]');
+  }
+
+  async function waitForHistory(container, ms, signal) {
+    await delay(ms, signal);
+    const started = Date.now();
+    while (!signal.aborted && historyBusy(container) && Date.now() - started < 6000) await delay(100, signal);
+    return signal.aborted || !historyBusy(container);
+  }
+
   async function loadConversation() {
     if (state.loading) {
       loadController?.abort();
       return;
     }
-    const entry = state.entries[state.active] || state.entries[0];
+    scan();
+    const active = state.entries[state.active];
+    const entry = active?.anchor?.isConnected ? active : state.entries.find(item => item.anchor?.isConnected);
     if (!entry) return;
+    jumpController?.abort();
     const container = scrollContainer(entry.anchor);
     const savedTop = container.scrollTop;
     const savedAnchor = entry.anchor;
@@ -433,8 +623,12 @@
     restoreAfterLoad = true;
     const { signal } = loadController;
     state.loading = true;
+    loadSeen = new Set();
+    for (const item of state.entries) if (item.anchor?.isConnected) loadSeen.add(item.groupKey || item.key);
     updateControls();
-    notify("正在补全…", true);
+    hidePreview();
+    setCompletionCover(container);
+    notify("");
     const stopOnInput = event => {
       // Our own buttons cancel in their click handlers; cancelling on pointerdown
       // would finish first and make the following click start a second scan.
@@ -443,44 +637,54 @@
     };
     for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) document.addEventListener(type, stopOnInput, { capture: true, passive: true });
     let complete = false;
+    let waiting = false;
     try {
+      const started = Date.now();
       let firstKey = null;
       // Give ChatGPT time to prepend older turns when the top edge is reached.
-      for (let pass = 0; pass < 5 && !signal.aborted; pass++) {
-        container.scrollTo({ top: 0, behavior: "instant" });
-        await delay(600, signal);
+      for (let pass = 0; pass < 120 && Date.now() - started < 90000 && !signal.aborted; pass++) {
+        container.scrollTo({ top: scrollBounds(container).min, behavior: "instant" });
+        if (!await waitForHistory(container, 600, signal)) { waiting = true; break; }
         if (routeKey() !== savedRoute) break;
         scan();
-        const nextKey = state.entries[0]?.key;
+        const nextKey = `${container.scrollHeight}:${state.entries.find(item => item.anchor?.isConnected)?.key}`;
         if (nextKey && nextKey === firstKey) break;
         firstKey = nextKey;
       }
       let stableBottom = 0;
-      const started = Date.now();
-      for (let step = 0; step < 240 && Date.now() - started < 90000 && !signal.aborted; step++) {
+      for (let step = 0; step < 240 && Date.now() - started < 90000 && !signal.aborted && !waiting; step++) {
         if (routeKey() !== savedRoute) break;
         scan();
-        const bottom = container.scrollHeight - container.clientHeight;
+        const bottom = scrollBounds(container).max;
         if (container.scrollTop >= bottom - 3) {
           stableBottom++;
           if (stableBottom >= 3) { complete = true; break; }
         } else stableBottom = 0;
         container.scrollTo({ top: Math.min(bottom, container.scrollTop + Math.max(160, container.clientHeight * .75)), behavior: "instant" });
-        await delay(160, signal);
+        if (!await waitForHistory(container, 160, signal)) waiting = true;
       }
     } finally {
       for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) document.removeEventListener(type, stopOnInput, true);
+      if (complete && !signal.aborted && routeKey() === savedRoute) {
+        state.entries = state.entries.filter(item => loadSeen.has(item.groupKey || item.key));
+      }
+      loadSeen = null;
+      if (routeKey() === savedRoute) {
+        if (restoreAfterLoad) {
+          const restored = savedAnchor.isConnected ? container.scrollTop + savedAnchor.getBoundingClientRect().top - viewportTop(container) - savedOffset : savedTop;
+          container.scrollTo({ top: clampScrollTop(container, restored), behavior: "instant" });
+          // Let the host remount the restored window before revealing it.
+          if (!document.hidden) await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
+      }
+      setCompletionCover(null);
       state.loading = false;
       loadController = null;
       updateControls();
       if (routeKey() === savedRoute) {
-        if (restoreAfterLoad) {
-          const restored = savedAnchor.isConnected ? container.scrollTop + savedAnchor.getBoundingClientRect().top - viewportTop(container) - savedOffset : savedTop;
-          container.scrollTo({ top: Math.max(0, restored), behavior: "instant" });
-        }
         scan();
         const pending = state.entries.filter(item => item.pending).length;
-        notify(complete ? `已读取 ${state.entries.length} 轮${pending ? `，仍有 ${pending} 条需页面加载` : "，已回到原位"}。` : restoreAfterLoad ? "已停止补全，并回到原位。" : "已停止补全。");
+        notify(waiting ? `已读取 ${state.entries.length} 轮，页面仍在加载，可稍后继续补全。` : complete ? `已读取 ${state.entries.length} 轮${pending ? `，仍有 ${pending} 条需页面加载` : "，已回到原位"}。` : restoreAfterLoad ? "已停止补全，并回到原位。" : "已停止补全。");
       }
     }
   }
@@ -489,9 +693,13 @@
     const next = routeKey();
     if (next === route) return false;
     loadController?.abort();
+    setCompletionCover(null);
+    jumpController?.abort();
     route = next;
     cache.clear();
     groupSnapshots.clear();
+    lastScanScroller = null;
+    windowed = false;
     state.entries = [];
     state.active = -1;
     renderSignature = "";
@@ -503,12 +711,15 @@
   }
 
   ui.wing.addEventListener("pointerenter", () => { scan(); setOpen(true); });
+  // Keep ChatGPT's page-level wheel handlers from taking over our scroll areas.
+  for (const area of [ui.list, ui.preview]) area.addEventListener("wheel", event => event.stopPropagation(), { passive: true });
   ui.wing.addEventListener("pointerleave", scheduleClose);
   ui.wing.addEventListener("focusout", scheduleClose);
   ui.rail.addEventListener("focus", () => setOpen(true));
   ui.rail.addEventListener("click", () => { setPinned(!state.pinned); setOpen(true); });
   ui.pin.addEventListener("click", () => { setPinned(!state.pinned); setOpen(true); });
   ui.close.addEventListener("click", () => { ui.rail.focus({ preventScroll: true }); closePanel(); });
+  ui["completion-stop"].addEventListener("click", () => loadController?.abort());
   ui["load-button"].addEventListener("click", () => {
     if (state.loading || state.entries.length) loadConversation();
     else {
@@ -517,8 +728,10 @@
     }
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && state.open) {
-      loadController?.abort();
+    if (event.key !== "Escape") return;
+    loadController?.abort();
+    jumpController?.abort();
+    if (state.open) {
       if (ui.panel.contains(shadow.activeElement)) ui.rail.focus({ preventScroll: true });
       closePanel();
     }
@@ -530,7 +743,7 @@
     if (event.target === host) return;
     if (!scrollFrame) scrollFrame = requestAnimationFrame(updateActive);
   }, { capture: true, passive: true });
-  window.addEventListener("resize", () => { positionPreview(); updateActive(); });
+  window.addEventListener("resize", () => { positionPreview(); updateActive(); updateCompletionCover(); });
   window.addEventListener("popstate", () => { checkRoute(); scheduleScan(); });
   window.addEventListener("hashchange", scheduleScan);
   window.navigation?.addEventListener("currententrychange", () => { checkRoute(); scheduleScan(); });
@@ -538,8 +751,14 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleScan(); });
   systemTheme.addEventListener("change", updateTheme);
   new MutationObserver(records => {
+    const conversationSelector = `main, #thread, [role="main"], ${TURN_SELECTOR}, ${MESSAGE_SELECTOR}`;
+    const containsConversation = node => node.nodeType === Node.ELEMENT_NODE && (node.matches(conversationSelector) || !!node.querySelector(conversationSelector));
     const changed = records.some(record => {
-      if (record.type !== "attributes" || !["class", "style", "hidden", "inert", "aria-hidden"].includes(record.attributeName)) return true;
+      if (record.type === "childList") {
+        return !!record.target.closest?.(conversationSelector) || [...record.addedNodes, ...record.removedNodes].some(containsConversation);
+      }
+      if (record.type === "characterData") return !!record.target.parentElement?.closest(conversationSelector);
+      if (!["class", "style", "hidden", "inert", "aria-hidden"].includes(record.attributeName)) return true;
       const target = record.target;
       return target.matches(`main, #thread, [role="main"], ${TURN_SELECTOR}, ${MESSAGE_SELECTOR}`) || !!target.querySelector(`${TURN_SELECTOR}, ${MESSAGE_SELECTOR}`);
     });
