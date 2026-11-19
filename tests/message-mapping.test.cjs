@@ -142,6 +142,43 @@ test("an empty question shell is virtualization rather than an edit of the cache
   assert.equal(await page.locator("#chatwing-root .answer").textContent(), "这是第二轮回答。");
 });
 
+test("a user turn heading does not survive as an extra question when the real turn mounts during scroll", async () => {
+  await page.goto("https://chatgpt.com/c/message-mapping-loading-turn");
+  await page.locator("#chatwing-root").waitFor();
+  await page.evaluate(() => {
+    const main = document.querySelector("main");
+    main.style.height = "500px";
+    document.querySelector("#thread").innerHTML = `
+      <article data-testid="conversation-turn-loading" data-turn="user" style="min-height: 1800px">
+        <h5>你说：</h5>
+      </article>`;
+  });
+  const entries = page.locator("#chatwing-root .entry");
+  await waitFor(async () => await entries.count() === 1, "the loading user turn has a placeholder");
+  const loadingLabel = await entries.first().textContent();
+
+  await page.evaluate(() => {
+    document.querySelector("#thread").innerHTML = `
+      <article data-testid="conversation-turn-1" data-turn="user" style="min-height: 1200px">
+        <h5>你说：</h5>
+        <div data-message-author-role="user">真实提问</div>
+      </article>
+      <article data-testid="conversation-turn-2" data-turn="assistant" style="min-height: 600px">
+        <div class="markdown">真实回答</div>
+      </article>`;
+    document.querySelector("main").scrollTop = 420;
+  });
+  const question = entries.filter({ hasText: /^真实提问$/ });
+  await question.waitFor({ state: "attached" });
+  await page.locator("#chatwing-root .rail").hover();
+  await question.hover();
+  assert.deepEqual(await entries.allTextContents(), ["真实提问"]);
+  assert.equal(await page.locator("#chatwing-root .conversation-count").textContent(), "已读 1 轮");
+  assert.equal(await page.locator("#chatwing-root .question").textContent(), "真实提问");
+  assert.equal(await page.locator("#chatwing-root .answer").textContent(), "真实回答");
+  assert.equal(loadingLabel, "提问内容待加载");
+});
+
 test("initially empty grouped shells remain navigable beyond the latest five mounted questions", async () => {
   await reset();
   await page.evaluate(() => {

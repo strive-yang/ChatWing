@@ -168,7 +168,10 @@
     const role = roleOf(anchor) || roleOf(source) || anchor.getAttribute("data-turn-key")?.match(/:(user|assistant)$/)?.[1];
     const groupKey = anchor.closest("[data-turn-key]")?.getAttribute("data-turn-key");
     const key = anchor.getAttribute("data-content-search-unit-key") || anchor.getAttribute("data-turn-key") || anchor.getAttribute("data-turn-id") || anchor.getAttribute("data-testid") || anchor.id || source?.getAttribute("data-message-id") || (groupKey && role ? `${groupKey}:${role}` : `position-${index}`);
-    return { anchor, source: source || anchor, key, role: role || cache.get(key)?.role };
+    const resolvedRole = role || cache.get(key)?.role;
+    // A user turn shell may contain only the site's heading while its message mounts.
+    const body = source || (resolvedRole === "user" ? anchor.querySelector(".whitespace-pre-wrap") : anchor);
+    return { anchor, source: body, key, role: resolvedRole };
   }
 
   function collectMessages() {
@@ -257,7 +260,7 @@
           question: record.text,
           label: record.text.replace(/\s+/g, " ").slice(0, 100) || (attachment ? `图片：${attachment}` : "提问内容待加载"),
           answer: "",
-          pending: !record.text,
+          pending: !record.text && !attachment,
         };
         entries.push(current);
       } else if (current && current.groupKey === groupKey && record.text) {
@@ -298,7 +301,10 @@
       const old = previous.get(identity(entry));
       return old?.question && entry.question && old.question !== entry.question;
     });
-    const retained = state.entries.filter(entry => !edited || entry.position < previous.get(identity(edited)).position);
+    // Keep mounted placeholders and offscreen turns with content already read.
+    const retained = state.entries.filter(entry =>
+      (!entry.pending || entry.answer || liveKeys.has(identity(entry))) &&
+      (!edited || entry.position < previous.get(identity(edited)).position));
     const merged = new Map(retained.map(entry => [identity(entry), {
       ...entry, anchor: entry.anchor?.isConnected ? entry.anchor : null,
     }]));
